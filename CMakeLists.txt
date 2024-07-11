@@ -22,6 +22,21 @@ endif()
 
 project(sentencepiece VERSION ${SPM_VERSION} LANGUAGES C CXX)
 
+set(SPM_PROTOBUF_PROVIDER "internal" CACHE STRING "Provider of protobuf library")
+
+# STXXL configuration
+find_package(STXXL REQUIRED)
+message(STATUS "STXXL_INCLUDE_DIRS: ${STXXL_INCLUDE_DIRS}")
+message(STATUS "STXXL_LIBRARIES: ${STXXL_LIBRARIES}")
+message(STATUS "STXXL_CXX_FLAGS: ${STXXL_CXX_FLAGS}")
+
+include_directories(${STXXL_INCLUDE_DIRS})
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${STXXL_CXX_FLAGS}")
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  add_compile_options(-Wno-deprecated-declarations)
+endif()
+
 option(SPM_ENABLE_NFKC_COMPILE "Enables NFKC compile" OFF)
 option(SPM_ENABLE_SHARED "Builds shared libaries in addition to static libraries." ON)
 option(SPM_BUILD_TEST "Builds test binaries." OFF)
@@ -47,7 +62,7 @@ if(WIN32)
   set(SPM_ENABLE_SHARED OFF)
 endif()
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if((CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND

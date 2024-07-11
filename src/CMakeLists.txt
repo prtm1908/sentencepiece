@@ -86,6 +86,8 @@ endif()
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
 
+include_directories(${STXXL_INCLUDE_DIRS})
+
 if (MSVC)
   add_definitions("/D_USE_INTERNAL_STRING_VIEW")
 else()
@@ -182,7 +184,7 @@ set(SPM_TEST_SRCS
 
 find_package(Threads REQUIRED)
 
-list(APPEND SPM_LIBS ${PROTOBUF_LITE_LIBRARY} Threads::Threads)
+list(APPEND SPM_LIBS ${PROTOBUF_LITE_LIBRARY} Threads::Threads ${STXXL_LIBRARIES})
 
 if (SPM_ENABLE_NFKC_COMPILE)
   find_package(ICU 4.4 COMPONENTS i18n data uc REQUIRED)
@@ -225,20 +227,20 @@ if (SPM_ENABLE_SHARED)
   add_library(sentencepiece SHARED ${SPM_SRCS})
   add_library(sentencepiece_train SHARED ${SPM_TRAIN_SRCS})
   if (ANDROID)
-    target_link_libraries(sentencepiece log)
-    target_link_libraries(sentencepiece_train log)
+    target_link_libraries(sentencepiece log ${STXXL_LIBRARIES})
+    target_link_libraries(sentencepiece_train log ${STXXL_LIBRARIES})
   endif()
 endif()
 
 add_library(sentencepiece-static STATIC ${SPM_SRCS})
 add_library(sentencepiece_train-static STATIC ${SPM_TRAIN_SRCS})
 
-target_link_libraries(sentencepiece-static INTERFACE ${SPM_LIBS})
-target_link_libraries(sentencepiece_train-static INTERFACE sentencepiece-static ${SPM_LIBS})
+target_link_libraries(sentencepiece-static INTERFACE ${SPM_LIBS} ${STXXL_LIBRARIES})
+target_link_libraries(sentencepiece_train-static INTERFACE sentencepiece-static ${SPM_LIBS} ${STXXL_LIBRARIES})
 
 if (SPM_ENABLE_SHARED)
-  target_link_libraries(sentencepiece ${SPM_LIBS})
-  target_link_libraries(sentencepiece_train ${SPM_LIBS} sentencepiece)
+  target_link_libraries(sentencepiece ${SPM_LIBS} ${STXXL_LIBRARIES})
+  target_link_libraries(sentencepiece_train ${SPM_LIBS} sentencepiece ${STXXL_LIBRARIES})
   set(SPM_INSTALLTARGETS sentencepiece sentencepiece_train sentencepiece-static sentencepiece_train-static)
   set_target_properties(sentencepiece sentencepiece_train PROPERTIES SOVERSION 0 VERSION 0.0.0)
   set_target_properties(sentencepiece PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS YES)
@@ -289,15 +291,15 @@ add_executable(spm_normalize spm_normalize_main.cc)
 add_executable(spm_train spm_train_main.cc)
 add_executable(spm_export_vocab spm_export_vocab_main.cc)
 
-target_link_libraries(spm_encode sentencepiece)
-target_link_libraries(spm_decode sentencepiece)
-target_link_libraries(spm_normalize sentencepiece sentencepiece_train)
-target_link_libraries(spm_train sentencepiece sentencepiece_train)
-target_link_libraries(spm_export_vocab sentencepiece)
+target_link_libraries(spm_encode sentencepiece ${STXXL_LIBRARIES})
+target_link_libraries(spm_decode sentencepiece ${STXXL_LIBRARIES})
+target_link_libraries(spm_normalize sentencepiece sentencepiece_train ${STXXL_LIBRARIES})
+target_link_libraries(spm_train sentencepiece sentencepiece_train ${STXXL_LIBRARIES})
+target_link_libraries(spm_export_vocab sentencepiece ${STXXL_LIBRARIES})
 
 if (SPM_ENABLE_NFKC_COMPILE)
   add_executable(compile_charsmap compile_charsmap_main.cc)
-  target_link_libraries(compile_charsmap sentencepiece sentencepiece_train)
+  target_link_libraries(compile_charsmap sentencepiece sentencepiece_train ${STXXL_LIBRARIES})
 endif()
 
 list(APPEND SPM_INSTALLTARGETS
@@ -329,9 +331,9 @@ if (SPM_BUILD_TEST OR SPM_COVERAGE)
   add_executable(spm_test test_main.cc ${SPM_TEST_SRCS})
 
   if (SPM_COVERAGE)
-    target_link_libraries(spm_test sentencepiece sentencepiece_train "-lgcov")
+    target_link_libraries(spm_test sentencepiece sentencepiece_train "-lgcov" ${STXXL_LIBRARIES})
   else()
-    target_link_libraries(spm_test sentencepiece sentencepiece_train)
+    target_link_libraries(spm_test sentencepiece sentencepiece_train ${STXXL_LIBRARIES})
   endif()
 
   set(MEMORYCHECK_COMMAND_OPTIONS "--leak-check=full --show-leak-kinds=definite,possible --error-exitcode=1")

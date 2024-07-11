@@ -22,8 +22,8 @@ namespace sentencepiece {
 
 namespace {
 constexpr unsigned int kDefaultSeed = static_cast<unsigned int>(-1);
-static std::atomic<unsigned int> g_seed = kDefaultSeed;
-static std::atomic<int> g_minloglevel = 0;
+static std::atomic<unsigned int> g_seed(ATOMIC_VAR_INIT(kDefaultSeed));
+static std::atomic<int> g_minloglevel(ATOMIC_VAR_INIT(0));
 }  // namespace
 
 void SetRandomGeneratorSeed(unsigned int seed) {
