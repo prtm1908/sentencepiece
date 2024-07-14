@@ -28,6 +28,9 @@ sys.path.append(os.path.join('.', 'test'))
 leveldb_include_dir = "C:/Program Files (x86)/leveldb/include"
 leveldb_lib_dir = "C:/Program Files (x86)/leveldb/lib"
 
+sentencepiece_include_dir="C:/Program Files (x86)/sentencepiece/include"
+sentencepiece_lib_dir="C:/Program Files (x86)/sentencepiece/lib"
+
 def long_description():
   with codecs.open('README.md', 'r', 'utf-8') as f:
     long_description = f.read()
@@ -70,11 +73,11 @@ if is_sentencepiece_installed():
   )
   cmdclass = {}
 else:
-  cflags = ['/std:c++17', f'/I{leveldb_include_dir}', '/I.\\build\\root\\include']
+  cflags = ['/std:c++17', f'/I{leveldb_include_dir}', '/I.\\build\\root\\include', f'/I{sentencepiece_include_dir}']
   libs = [
       f'{leveldb_lib_dir}/leveldb.lib',
-      '.\\build\\root\\lib\\sentencepiece.lib',
-      '.\\build\\root\\lib\\sentencepiece_train.lib',
+      f'{sentencepiece_lib_dir}/sentencepiece.lib',
+      f'{sentencepiece_lib_dir}/sentencepiece_train.lib',
   ]
 
   SENTENCEPIECE_EXT = Extension(
@@ -82,6 +85,9 @@ else:
       sources=['src/sentencepiece/sentencepiece_wrap.cxx'],
       extra_compile_args=cflags,
       extra_link_args=libs,
+      include_dirs=[sentencepiece_include_dir, leveldb_include_dir, '.\\build\\root\\include'],
+      libraries=['leveldb'],
+      library_dirs=[leveldb_lib_dir],
   )
   cmdclass = {'build_ext': _build_ext}
 

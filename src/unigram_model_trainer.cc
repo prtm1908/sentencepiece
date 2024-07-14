@@ -190,7 +190,11 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
       w->first = absl::StrReplaceAll(w->first, {{delimiter, ""}});
       return chars;
     }
-    return string_util::UTF8ToUnicodeText(w->first);
+    std::vector<char32_t> result;
+    for (char32_t c : string_util::UTF8ToUnicodeText(w->first)) {
+      result.push_back(c);
+    }
+    return result;
   };
 
   // Merges all sentences into one array with 0x0000 delimiter.
