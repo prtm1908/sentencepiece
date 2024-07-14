@@ -154,9 +154,16 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
 
   auto pretokenize_or_rewrite = [&](std::pair<std::string, int64> *w) {
     if (pretokenizer) {
+      std::string key = pretokenizer->PreTokenize(w->first);
+      std::string value;
+      leveldb::Status status = pretokenizer->GetDB()->Get(leveldb::ReadOptions(), key, &value);
+      if (!status.ok()) {
+        // Handle error, e.g., log and return an empty vector or throw an exception
+        return std::vector<char32>{};
+      }
       std::vector<char32> chars;
-      for (const auto &w : pretokenizer->PreTokenize(w->first)) {
-        for (const auto &c : string_util::UTF8ToUnicodeText(w)) {
+      for (const auto &token : string_util::SplitUTF8String(value)) {
+        for (const auto &c : string_util::UTF8ToUnicodeText(token)) {
           chars.push_back(c);
         }
         chars.push_back(kSentenceBoundary);

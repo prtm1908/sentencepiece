@@ -19,6 +19,10 @@ class PretokenizerForTrainingInterface {
   virtual ~PretokenizerForTrainingInterface();
   virtual util::Status status() const = 0;
 
+  leveldb::DB* GetDB() const {
+    return db_.get();
+  }
+
   // Puts kUPPBoundaryStr before and after the pre-tokenizer's segmentation
   // when there are no spaces between these tokens.
   // Returns a unique key to access the pretokenized result in LevelDB.
