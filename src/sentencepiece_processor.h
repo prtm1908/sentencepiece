@@ -21,6 +21,8 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include <leveldb/db.h>
+#include <leveldb/write_batch.h>
 
 #ifndef SWIG
 namespace absl {
@@ -171,21 +173,68 @@ class ImmutableSentencePieceText_ImmutableSentencePiece {
 
   friend class ImmutableSentencePieceText;
 
+  // Serialization and Deserialization methods
+  std::string Serialize() const;
+  static ImmutableSentencePieceText_ImmutableSentencePiece Deserialize(const std::string& data);
+
  private:
-  explicit ImmutableSentencePieceText_ImmutableSentencePiece(
-      const SentencePieceText_SentencePiece &sp);
+  explicit ImmutableSentencePieceText_ImmutableSentencePiece(const SentencePieceText_SentencePiece &sp);
   const SentencePieceText_SentencePiece *sp_ = nullptr;
+
+  // Adding private members to hold the data for serialization
+  std::string piece_;
+  std::string surface_;
+  uint32_t id_;
+  uint32_t begin_;
+  uint32_t end_;
 };
+
+ImmutableSentencePieceText_ImmutableSentencePiece::ImmutableSentencePieceText_ImmutableSentencePiece()
+  : piece_(""), surface_(""), id_(0), begin_(0), end_(0) {}
+
+const std::string& ImmutableSentencePieceText_ImmutableSentencePiece::piece() const {
+  return piece_;
+}
+
+const std::string& ImmutableSentencePieceText_ImmutableSentencePiece::surface() const {
+  return surface_;
+}
+
+uint32_t ImmutableSentencePieceText_ImmutableSentencePiece::id() const {
+  return id_;
+}
+
+uint32_t ImmutableSentencePieceText_ImmutableSentencePiece::begin() const {
+  return begin_;
+}
+
+uint32_t ImmutableSentencePieceText_ImmutableSentencePiece::end() const {
+  return end_;
+}
+
+std::string ImmutableSentencePieceText_ImmutableSentencePiece::Serialize() const {
+  std::ostringstream oss;
+  oss << piece_ << '\n' << surface_ << '\n' << id_ << '\n' << begin_ << '\n' << end_;
+  return oss.str();
+}
+
+ImmutableSentencePieceText_ImmutableSentencePiece ImmutableSentencePieceText_ImmutableSentencePiece::Deserialize(const std::string& data) {
+  std::istringstream iss(data);
+  ImmutableSentencePieceText_ImmutableSentencePiece piece;
+  std::getline(iss, piece.piece_);
+  std::getline(iss, piece.surface_);
+  iss >> piece.id_ >> piece.begin_ >> piece.end_;
+  return piece;
+}
 
 class ImmutableSentencePieceText {
  public:
   ImmutableSentencePieceText();
   virtual ~ImmutableSentencePieceText();
 
-  std::vector<ImmutableSentencePieceText_ImmutableSentencePiece> pieces() const;
-
   size_t pieces_size() const;
   ImmutableSentencePieceText_ImmutableSentencePiece pieces(int index) const;
+  void AddPiece(int index, const ImmutableSentencePieceText_ImmutableSentencePiece& piece);
 
   const std::string &text() const;
   float score() const;
@@ -204,9 +253,39 @@ class ImmutableSentencePieceText {
 
  private:
   explicit ImmutableSentencePieceText(const SentencePieceText &spt);
+
   const SentencePieceText *spt_ = nullptr;
   std::shared_ptr<SentencePieceText> rep_;
+
+  // LevelDB database instance
+  leveldb::DB* db_;
+  std::string db_name_ = "sentence_pieces";
+
+  void OpenDB();
+  void CloseDB();
 };
+
+ImmutableSentencePieceText::ImmutableSentencePieceText() {
+  OpenDB();
+}
+
+ImmutableSentencePieceText::~ImmutableSentencePieceText() {
+  CloseDB();
+}
+
+void ImmutableSentencePieceText::OpenDB() {
+  leveldb::Options options;
+  options.create_if_missing = true;
+  leveldb::Status status = leveldb::DB::Open(options, db_name_, &db_);
+  if (!status.ok()) {
+    throw std::runtime_error("Failed to open LevelDB");
+  }
+}
+
+void ImmutableSentencePieceText::CloseDB() {
+  delete db_;
+}
+
 
 // Wrapper class of SentencePieceText
 // This wrapper only allows an immutable access to the proto and

@@ -130,18 +130,23 @@ uint32_t ImmutableSentencePieceText_ImmutableSentencePiece::end() const {
   return sp_->end();
 }
 
-std::vector<ImmutableSentencePieceText_ImmutableSentencePiece>
-ImmutableSentencePieceText::pieces() const {
-  std::vector<ImmutableSentencePieceText_ImmutableSentencePiece> pieces(
-      spt_->pieces_size());
-  for (int i = 0; i < spt_->pieces_size(); ++i)
-    pieces[i] =
-        ImmutableSentencePieceText_ImmutableSentencePiece(spt_->pieces(i));
-  return pieces;
+ImmutableSentencePieceText_ImmutableSentencePiece ImmutableSentencePieceText::pieces(int index) const {
+  std::string key = std::to_string(index);
+  std::string value;
+  leveldb::Status status = db_->Get(leveldb::ReadOptions(), key, &value);
+  if (!status.ok()) {
+    throw std::runtime_error("Failed to get piece from LevelDB");
+  }
+  return ImmutableSentencePieceText_ImmutableSentencePiece::Deserialize(value);
 }
 
 size_t ImmutableSentencePieceText::pieces_size() const {
-  return spt_->pieces_size();
+  std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
+  size_t count = 0;
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    ++count;
+  }
+  return count;
 }
 
 ImmutableSentencePieceText_ImmutableSentencePiece
