@@ -45,7 +45,6 @@
 #include <leveldb/options.h>
 #include <leveldb/status.h>
 #include <leveldb/write_batch.h>
-#include <google/protobuf/text_format.h>
 
 namespace sentencepiece {
 namespace {
@@ -197,8 +196,13 @@ SentencePieceText* ImmutableSentencePieceText::mutable_proto() {
   return rep_.get();
 }
 
+void ImmutableSentencePieceText::ConvertToUnicodeSpansInternal() {
+    if (spt_ == nullptr) return;
+    ::sentencepiece::ConvertToUnicodeSpansInternal(const_cast<SentencePieceText*>(spt_));
+}
+
 void ImmutableSentencePieceText::ConvertToUnicodeSpans() {
-  ConvertToUnicodeSpansInternal(mutable_proto());
+    ConvertToUnicodeSpansInternal();
 }
 
 util::bytes ImmutableSentencePieceText::SerializeAsString() const {
@@ -216,7 +220,7 @@ void ImmutableSentencePieceText::AddPiece(int index, const ImmutableSentencePiec
 
 std::string ImmutableSentencePieceText::Serialize() const {
   std::string output;
-  if (!google::protobuf::TextFormat::PrintToString(*spt_, &output)) {
+  if (!spt_->SerializeToString(&output)) {
     throw std::runtime_error("Failed to serialize SentencePieceText");
   }
   return output;
@@ -225,7 +229,7 @@ std::string ImmutableSentencePieceText::Serialize() const {
 // Deserialize method
 ImmutableSentencePieceText ImmutableSentencePieceText::Deserialize(const std::string& data) {
   SentencePieceText spt;
-  if (!google::protobuf::TextFormat::ParseFromString(data, &spt)) {
+  if (!spt.ParseFromString(data)) {
     throw std::runtime_error("Failed to deserialize SentencePieceText");
   }
   return ImmutableSentencePieceText(spt);
@@ -274,15 +278,6 @@ ImmutableSentencePieceText ImmutableNBestSentencePieceText::nbests(int index) co
   return ImmutableSentencePieceText::Deserialize(value);
 }
 
-std::vector<ImmutableSentencePieceText> ImmutableNBestSentencePieceText::nbests() const {
-  std::vector<ImmutableSentencePieceText> nbests;
-  std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
-  for (it->SeekToFirst(); it->Valid(); it->Next()) {
-    nbests.push_back(ImmutableSentencePieceText::Deserialize(it->value().ToString()));
-  }
-  return nbests;
-}
-
 NBestSentencePieceText* ImmutableNBestSentencePieceText::mutable_proto() {
   if (!rep_) {
     rep_ = std::make_shared<NBestSentencePieceText>();
@@ -291,19 +286,18 @@ NBestSentencePieceText* ImmutableNBestSentencePieceText::mutable_proto() {
 }
 
 void ImmutableNBestSentencePieceText::ConvertToUnicodeSpans() {
-  if (!mutable_proto()) return;
-
-  std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
-  for (it->SeekToFirst(); it->Valid(); it->Next()) {
-    ImmutableSentencePieceText spt = ImmutableSentencePieceText::Deserialize(it->value().ToString());
-    spt.ConvertToUnicodeSpansInternal();
-    std::string key = it->key().ToString();
-    std::string value = spt.Serialize();
-    leveldb::Status status = db_->Put(leveldb::WriteOptions(), key, value);
-    if (!status.ok()) {
-      throw std::runtime_error("Failed to update nbest in LevelDB");
+    if (!mutable_proto()) return;
+    std::unique_ptr<leveldb::Iterator> it(db_->NewIterator(leveldb::ReadOptions()));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+        ImmutableSentencePieceText spt = ImmutableSentencePieceText::Deserialize(it->value().ToString());
+        spt.ConvertToUnicodeSpans();  // This is correct now
+        std::string key = it->key().ToString();
+        std::string value = spt.Serialize();
+        leveldb::Status status = db_->Put(leveldb::WriteOptions(), key, value);
+        if (!status.ok()) {
+            throw std::runtime_error("Failed to update nbest in LevelDB");
+        }
     }
-  }
 }
 
 std::string ImmutableNBestSentencePieceText::SerializeAsString() const {

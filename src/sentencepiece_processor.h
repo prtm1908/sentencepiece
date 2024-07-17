@@ -212,6 +212,7 @@ class ImmutableSentencePieceText {
 
   // Converts the utf8 byte spans into Unicode char span.
   void ConvertToUnicodeSpans();
+  void ConvertToUnicodeSpansInternal();  
 
   std::string Serialize() const;
   static ImmutableSentencePieceText Deserialize(const std::string& data);
