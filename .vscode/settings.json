@@ -98,5 +98,6 @@
         "stack": "cpp",
         "string_view": "cpp",
         "variant": "cpp"
-    }
+    },
+    "cmake.configureOnOpen": false
 }
