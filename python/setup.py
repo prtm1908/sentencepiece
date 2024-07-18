@@ -25,11 +25,11 @@ from setuptools.command.build_py import build_py as _build_py
 sys.path.append(os.path.join('.', 'test'))
 
 # Set LevelDB paths
-leveldb_include_dir = "C:/Program Files (x86)/leveldb/include"
-leveldb_lib_dir = "C:/Program Files (x86)/leveldb/lib"
+leveldb_include_dir = "/usr/local/include"
+leveldb_lib_dir = "/usr/local/lib"
 
-sentencepiece_include_dir="C:/Program Files (x86)/sentencepiece/include"
-sentencepiece_lib_dir="C:/Program Files (x86)/sentencepiece/lib"
+sentencepiece_include_dir="/usr/local/include"
+sentencepiece_lib_dir="/usr/local/lib"
 
 def long_description():
   with codecs.open('README.md', 'r', 'utf-8') as f:
