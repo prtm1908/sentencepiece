@@ -330,6 +330,7 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
 
   return seed_sentencepieces;
 }
+}
 
 std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
                                      int64 *num_tokens) const {
