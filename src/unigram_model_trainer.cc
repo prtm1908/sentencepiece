@@ -204,8 +204,6 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
   std::vector<char32> array;
   absl::flat_hash_map<std::string, int64> all_chars;
 
-  const bool is_tsv = trainer_spec_.input_format() == "tsv";
-
   std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     std::string key = it->key().ToString();
@@ -490,16 +488,20 @@ TrainerModel::SentencePieces Trainer::PruneSentencePieces(
 
       pool->Schedule([&, n]() {
         Lattice lattice;
-        for (size_t i = n; i < sentences_.size();
-             i += trainer_spec_.num_threads()) {
-          const auto &w = sentences_[i];
-          lattice.SetSentence(w.first);
+        std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+        for (it->SeekToFirst(); it->Valid(); it->Next()) {
+          const std::string &key = it->key().ToString();
+          const std::string &value = it->value().ToString();
+          int64_t count;
+          CHECK(absl::SimpleAtoi(value, &count)) << "Invalid count: " << value;
+
+          lattice.SetSentence(key);
           model.PopulateNodes(&lattice);
-          vsums[n] += w.second;
+          vsums[n] += count;
           for (const auto *node : lattice.Viterbi().first) {
             if (node->id >= 0) {
-              freqs[n][node->id] += w.second;
-              inverteds[n][node->id].push_back(i);
+              freqs[n][node->id] += count;
+              inverteds[n][node->id].push_back(std::stoi(key));
             }
           }
         }
@@ -537,7 +539,15 @@ TrainerModel::SentencePieces Trainer::PruneSentencePieces(
     } else {
       float F = 0.0;  // the frequency of sentencepieces[i].
       for (const int n : inverted[i]) {
-        F += sentences_[n].second;
+        std::string value;
+        leveldb::Status s = sentence_db_->Get(leveldb::ReadOptions(), std::to_string(n), &value);
+        if (s.ok()) {
+          int64_t count;
+          CHECK(absl::SimpleAtoi(value, &count)) << "Invalid count: " << value;
+          F += count;
+        } else {
+          LOG(WARNING) << "Failed to get sentence " << n << ": " << s.ToString();
+        }
       }
       F /= vsum;  // normalizes by all sentence frequency.
 

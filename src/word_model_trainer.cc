@@ -21,10 +21,16 @@
 #include "word_model.h"
 #include "word_model_trainer.h"
 
+#include <leveldb/db.h>
+#include <leveldb/iterator.h>
+#include "absl/strings/numbers.h"
+#include <unordered_map>
+
 namespace sentencepiece {
 namespace word {
 
 util::Status Trainer::Train() {
+  CHECK(sentence_db_ != nullptr) << "sentence_db_ is not initialized";
   RETURN_IF_ERROR(status());
 
   CHECK_OR_RETURN(normalizer_spec_.escape_whitespaces());
@@ -32,10 +38,16 @@ util::Status Trainer::Train() {
 
   RETURN_IF_ERROR(LoadSentences());
 
-  absl::flat_hash_map<std::string, uint64> freq;
-  for (const auto &it : sentences_) {
-    for (const auto &s : SplitIntoWords(it.first)) {
-      freq[std::string(s)] += it.second;
+  std::unordered_map<std::string, int64_t> freq;  // Declare freq here
+
+  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    const std::string &sentence = it->key().ToString();
+    const std::string &value = it->value().ToString();
+    int64_t count;
+    CHECK(absl::SimpleAtoi(value, &count)) << "Invalid count: " << value;
+    for (const auto &s : SplitIntoWords(sentence)) {
+      freq[std::string(s)] += count;
     }
   }
 
