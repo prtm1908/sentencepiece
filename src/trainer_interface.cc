@@ -101,6 +101,7 @@ bool is_unicode_decimal_number(char32 c) {
 class SentenceSelector {
  public:
   using Sampler = random::ReservoirSampler<std::string>;
+  std::vector<std::string> sampled_sentences_;
 
   static constexpr int64 kTooBigSentencesSize = 1000000;
 
@@ -109,7 +110,7 @@ class SentenceSelector {
     if (spec_->input_sentence_size() > 0) {
       if (spec_->shuffle_input_sentence()) {
         constexpr size_t kSeed = 12345678;
-        sampler_ = std::make_unique<Sampler>(spec_->input_sentence_size(), kSeed);
+        sampler_ = std::make_unique<Sampler>(&sampled_sentences_, spec_->input_sentence_size(), kSeed);
       } else {
         LOG(INFO)
             << "First " << spec_->input_sentence_size()

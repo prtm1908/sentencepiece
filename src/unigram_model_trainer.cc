@@ -37,6 +37,9 @@
 #include "unicode_script.h"
 #include "util.h"
 
+#include <leveldb/db.h>
+#include <leveldb/iterator.h>
+
 namespace sentencepiece {
 namespace unigram {
 namespace {
@@ -145,7 +148,7 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePieces() {
 // Returns seed sentencepieces for EM training.
 template <typename node_int_type>
 TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
-  CHECK(!sentences_.empty());
+  CHECK(sentence_db_ != nullptr);
   CHECK(!required_chars_.empty());
 
   // Pretokenizer applied only in training time.
@@ -203,7 +206,14 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
 
   const bool is_tsv = trainer_spec_.input_format() == "tsv";
 
-  for (auto &w : sentences_) {
+  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    std::string key = it->key().ToString();
+    std::string value = it->value().ToString();
+    int64_t count;
+    CHECK(absl::SimpleAtoi(value, &count)) << "Invalid count: " << value;
+    
+    std::pair<std::string, int64_t> w(key, count);
     const auto ut = pretokenize_or_rewrite(&w);
     for (const auto &c : ut) {
       array.push_back(c);
@@ -211,17 +221,7 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
         all_chars[string_util::UnicodeCharToUTF8(c)] += w.second;
       }
     }
-    array.push_back(kSentenceBoundary);  // sentence boundary marker.
-
-    // Naive workaround to over-sample the input.
-    // In TSV mode, the frequency field is not used to extract the seed piece.
-    // we can at least extract all pieces by copying the input because
-    // the occurrence gets at least larger than or equals to 2.
-    if (is_tsv) {
-      for (const auto &c : ut) array.push_back(c);
-      array.push_back(kSentenceBoundary);
-    }
-  }
+    array.push_back(kSentenceBoundary);
 
   // all_chars must be included in the seed sentencepieces.
   TrainerModel::SentencePieces seed_sentencepieces;
@@ -341,8 +341,11 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
   pool->StartWorkers();
 
   int64 all_sentence_freq = 0;
-  for (const auto &w : sentences_) {
-    all_sentence_freq += w.second;
+  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    int64_t count;
+    CHECK(absl::SimpleAtoi(it->value().ToString(), &count)) << "Invalid count: " << it->value().ToString();
+    all_sentence_freq += count;
   }
 
   // Executes E step in parallel
@@ -350,10 +353,29 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
     pool->Schedule([&, n]() {
       Lattice lattice;
       expected[n].resize(model.GetPieceSize(), 0.0);
-      for (size_t i = n; i < sentences_.size();
-           i += trainer_spec_.num_threads()) {
-        const std::string &w = sentences_[i].first;
-        const int64 freq = sentences_[i].second;
+      int64_t total_sentences = 0;
+      {
+        std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+        for (it->SeekToFirst(); it->Valid(); it->Next()) {
+          total_sentences++;
+        }
+      }
+      for (size_t i = n; i < total_sentences; i += trainer_spec_.num_threads()) {
+        std::string key, value;
+        {
+          std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+          it->Seek(std::to_string(i));
+          if (it->Valid()) {
+            key = it->key().ToString();
+            value = it->value().ToString();
+          } else {
+            LOG(ERROR) << "Invalid sentence index: " << i;
+            continue;
+          }
+        }
+        const std::string &w = key;
+        int64 freq;
+        CHECK(absl::SimpleAtoi(value, &freq)) << "Invalid frequency: " << value;
         lattice.SetSentence(w);
         model.PopulateNodes(&lattice);
         const float Z = lattice.PopulateMarginal(freq, &expected[n]);
@@ -598,6 +620,7 @@ TrainerModel::SentencePieces Trainer::FinalizeSentencePieces(
 }
 
 util::Status Trainer::Train() {
+  RETURN_IF_ERROR(OpenSentenceDB());
   RETURN_IF_ERROR(status());
 
   CHECK_EQ_OR_RETURN(TrainerSpec::UNIGRAM, trainer_spec_.model_type());
@@ -615,7 +638,14 @@ util::Status Trainer::Train() {
     SplitSentencesByWhitespace();
   }
 
-  LOG(INFO) << "Using " << sentences_.size() << " sentences for EM training";
+  int64_t total_sentences = 0;
+  {
+    std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      total_sentences++;
+    }
+  }
+  LOG(INFO) << "Using " << total_sentences << " sentences for EM training";
 
   desired_vocab_size_ = static_cast<size_t>(trainer_spec_.vocab_size() * 1.1);
 
@@ -651,6 +681,7 @@ util::Status Trainer::Train() {
   // Finally, adjusts the size of sentencepices to be |vocab_size|.
   final_pieces_ = FinalizeSentencePieces(model);
 
+  RETURN_IF_ERROR(CloseSentenceDB());
   return Save();
 }
 }  // namespace unigram
