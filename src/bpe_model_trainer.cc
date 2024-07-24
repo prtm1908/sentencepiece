@@ -95,7 +95,16 @@ void Trainer::ComputeFreq(Symbol *symbol) const {
         symbol->right != symbols_[pos.sid][pos.right]) {
       it = symbol->positions.erase(it);
     } else {
-      symbol->freq += sentences_[pos.sid].second;
+    std::string value;
+    std::string key = std::to_string(pos.sid);
+    leveldb::Status status = sentence_db_->Get(leveldb::ReadOptions(), key, &value);
+    if (status.ok()) {
+      // Assuming the value is stored as a pair of strings separated by a delimiter
+      size_t delimiter_pos = value.find('\t');
+      if (delimiter_pos != std::string::npos) {
+        symbol->freq += std::stoi(value.substr(delimiter_pos + 1));
+      }
+    }
       ++it;
     }
   }
@@ -188,30 +197,45 @@ util::Status Trainer::Train() {
   if (pretokenizer || !trainer_spec_.pretokenization_delimiter().empty()) {
     absl::string_view delimiter = trainer_spec_.pretokenization_delimiter();
     LOG(INFO) << "Preprocessing with pretokenizer...";
-    for (auto &w : sentences_) {
+    std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      std::string key = it->key().ToString();
+      std::string value = it->value().ToString();
       if (pretokenizer) {
-        std::string key = pretokenizer->PreTokenize(w.first);
+        std::string pretokenized_key = pretokenizer->PreTokenize(value);
         leveldb::DB* db = pretokenizer->GetDB();
-        std::string value;
-        leveldb::Status status = db->Get(leveldb::ReadOptions(), key, &value);
+        std::string pretokenized_value;
+        leveldb::Status status = db->Get(leveldb::ReadOptions(), pretokenized_key, &pretokenized_value);
         if (status.ok()) {
-          w.first = value;
+          value = pretokenized_value;
         } else {
           LOG(ERROR) << "Failed to retrieve pretokenized value from LevelDB: " << status.ToString();
           // You might want to handle this error case appropriately
         }
       } else if (!delimiter.empty()) {
-        w.first = absl::StrReplaceAll(
-            w.first, {{delimiter, TrainerInterface::kUPPBoundaryStr}});
+        value = absl::StrReplaceAll(
+            value, {{delimiter, TrainerInterface::kUPPBoundaryStr}});
       }
+      // Update the value in the database
+      sentence_db_->Put(leveldb::WriteOptions(), key, value);
     }
   }
   // Initializes symbols_. symbols_[sid][i] stores an unary symbol.
-  symbols_.resize(sentences_.size());
-  for (size_t i = 0; i < sentences_.size(); ++i) {
-    for (const char32 c : string_util::UTF8ToUnicodeText(sentences_[i].first)) {
-      symbols_[i].push_back(GetCharSymbol(c));
+  size_t db_size = 0;
+  symbols_.clear(); // Clear the vector before populating
+  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    std::string value = it->value().ToString();
+    size_t delimiter_pos = value.find('\t');
+    if (delimiter_pos != std::string::npos) {
+      std::string sentence = value.substr(0, delimiter_pos);
+      std::vector<Symbol*> sentence_symbols;
+      for (const char32 c : string_util::UTF8ToUnicodeText(sentence)) {
+        sentence_symbols.push_back(GetCharSymbol(c));
+      }
+      symbols_.push_back(std::move(sentence_symbols));
     }
+    ++db_size;
   }
 
   // Makes all bigram symbols.
