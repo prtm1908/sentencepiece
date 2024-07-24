@@ -132,7 +132,7 @@ class SentenceSelector {
 
   bool Add(const TrainerInterface::Sentence& sentence) {
     if (spec_->input_sentence_size() == 0) {
-      util::Status status = trainer_->AddSentence(trainer_->GenerateSentenceKey(), sentence);
+      util::Status status = trainer_->AddSentence(sentence);
       if (!status.ok()) {
         LOG(ERROR) << "Failed to add sentence: " << status.ToString();
         return false;
@@ -142,7 +142,7 @@ class SentenceSelector {
       if (spec_->shuffle_input_sentence()) {
         sampler_->Add(sentence.first);
       } else {
-        util::Status status = trainer_->AddSentence(trainer_->GenerateSentenceKey(), sentence);
+        util::Status status = trainer_->AddSentence(sentence);
         if (status.ok()) {
           if (total_size_ >= spec_->input_sentence_size()) return false;
         } else {
@@ -345,15 +345,13 @@ util::Status TrainerInterface::OpenSentenceDB() {
   return util::InternalError("Failed to open LevelDB: " + status.ToString());
 }
 
-SentenceKey key = GenerateSentenceKey();
-int64 freq = 1;  // Or initialize with an appropriate value
-
 util::Status TrainerInterface::CloseSentenceDB() {
   sentence_db_.reset();
   return util::OkStatus();
 }
 
-util::Status TrainerInterface::AddSentence(const SentenceKey& key, const Sentence& sentence) {
+util::Status TrainerInterface::AddSentence(const Sentence& sentence) {
+  SentenceKey key = GenerateSentenceKey();
   std::string value = absl::StrCat(sentence.first, "\t", sentence.second);
   leveldb::Status status = sentence_db_->Put(leveldb::WriteOptions(), key, value);
   if (status.ok()) {
@@ -482,7 +480,7 @@ util::Status TrainerInterface::LoadSentences() {
     test_sentence_sampler.Add(sentence);
 
     key = GenerateSentenceKey();
-    RETURN_IF_ERROR(AddSentence(key, std::make_pair(sentence, freq)));
+    RETURN_IF_ERROR(AddSentence(std::make_pair(sentence, freq)));
   }
 
   RETURN_IF_ERROR(sentence_iterator_->status());
@@ -518,7 +516,8 @@ util::Status TrainerInterface::LoadSentences() {
       CHECK_OR_RETURN(s->find(" ") == std::string::npos)
           << "Normalized string must not include spaces";
       if (!s->empty()) {
-        util::Status add_status = AddSentence(key, std::make_pair(sentence, freq));
+        sentence.second = freq;
+        util::Status add_status = AddSentence(sentence);
         if (!add_status.ok()) {
           return add_status;
       } else {
@@ -542,8 +541,8 @@ util::Status TrainerInterface::LoadSentences() {
     chars_count[c].first = true;  // is_required_character.
   }
   
-  leveldb::Iterator* it = sentence_db_->NewIterator(leveldb::ReadOptions());
-  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+  leveldb::Iterator* it2 = sentence_db_->NewIterator(leveldb::ReadOptions());
+  for (it2->SeekToFirst(); it2->Valid(); it2->Next()) {
     Sentence sentence;
     RETURN_IF_ERROR(GetSentence(it->key().ToString(), &sentence));
     for (const char32 c : string_util::UTF8ToUnicodeText(sentence.first)) {
@@ -603,7 +602,8 @@ util::Status TrainerInterface::LoadSentences() {
       }
     }
     sentence.first = string_util::UnicodeTextToUTF8(uw2);
-    RETURN_IF_ERROR(AddSentence(key, std::make_pair(sentence, freq)));
+    sentence.second=freq;
+    RETURN_IF_ERROR(AddSentence(sentence));
   }
   delete it;
 
@@ -650,7 +650,7 @@ void TrainerInterface::SplitSentencesByWhitespace() {
   // Add tokenized sentences
   for (const auto &token : Sorted(tokens)) {
     SentenceKey key = GenerateSentenceKey();
-    util::Status status = AddSentence(key, std::make_pair(token.first, token.second));
+    util::Status status = AddSentence(std::make_pair(token.first, token.second));
     if (!status.ok()) {
       LOG(ERROR) << "Failed to add sentence: " << status.ToString();
     }

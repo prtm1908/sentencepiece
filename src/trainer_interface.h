@@ -78,7 +78,7 @@ public:
   using Sentence = std::pair<std::string, int64_t>;
   using SentenceKey = std::string;
 
-  util::Status AddSentence(const SentenceKey& key, const Sentence& sentence);
+  util::Status AddSentence(const Sentence& sentence);
   util::Status GetSentence(const SentenceKey& key, Sentence* sentence);
   util::Status DeleteSentence(const SentenceKey& key);
   util::Status IterateSentences(const std::function<bool(const Sentence&)>& callback);

@@ -86,9 +86,9 @@ endif()
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../third_party)
 
-include_directories("C:/Program Files (x86)/leveldb/include")
+include_directories("/usr/local/include")
 
-link_directories("C:/Program Files (x86)/leveldb/lib")
+link_directories("/usr/local/lib")
 
 
 if (MSVC)
