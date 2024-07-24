@@ -11,4 +11,4 @@ cd "C:\Users\prath\Desktop\sentencepiece\build"
 msbuild sentencepiece.sln /p:Configuration=Release
 cmake --install . --prefix "C:\Program Files (x86)\sentencepiece"
 
---input=sample_text.txt --model_prefix=m --vocab_size=1000
+spm_train --input=sample_text.txt --model_prefix=m --vocab_size=30
