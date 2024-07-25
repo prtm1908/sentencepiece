@@ -37,9 +37,6 @@
 #include "unicode_script.h"
 #include "util.h"
 
-#include <leveldb/db.h>
-#include <leveldb/iterator.h>
-
 namespace sentencepiece {
 namespace unigram {
 namespace {
@@ -155,36 +152,24 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
   // Pretokenizer is used as a constraint of piece extractions.
   const auto *pretokenizer = SentencePieceTrainer::GetPretokenizerForTraining();
 
-  auto pretokenize_or_rewrite = [&](std::pair<std::string, int64_t> *w) {
+  auto pretokenize_or_rewrite = [&](std::pair<std::string, int64> *w) {
     if (pretokenizer) {
-      std::string key = pretokenizer->PreTokenize(w->first);
-      std::string value;
-      leveldb::Status status = pretokenizer->GetDB()->Get(leveldb::ReadOptions(), key, &value);
-      if (!status.ok()) {
-        // Handle error
-        return std::vector<char32_t>{};
-      }
-      std::vector<char32_t> chars;
-
-      // Inline logic for splitting the UTF-8 string
-      std::stringstream ss(value);
-      std::string token;
-      while (std::getline(ss, token, ' ')) {
-        for (const auto &c : string_util::UTF8ToUnicodeText(token)) {
+      std::vector<char32> chars;
+      for (const auto &w : pretokenizer->PreTokenize(w->first)) {
+        for (const auto &c : string_util::UTF8ToUnicodeText(w)) {
           chars.push_back(c);
         }
         chars.push_back(kSentenceBoundary);
       }
-
       return chars;
     } else if (!trainer_spec_.pretokenization_delimiter().empty()) {
       // When delimiter is specified, tokenize the input with the delimiter.
       // For EM training, we assume that the delimiter doesn't exist and
       // rewrite the original sentence.
-      std::vector<char32_t> chars;
+      std::vector<char32> chars;
       absl::string_view delimiter = trainer_spec_.pretokenization_delimiter();
-      for (const auto &token : absl::StrSplit(w->first, delimiter)) {
-        for (const auto &c : string_util::UTF8ToUnicodeText(token)) {
+      for (const auto &w : absl::StrSplit(w->first, delimiter)) {
+        for (const auto &c : string_util::UTF8ToUnicodeText(w)) {
           chars.push_back(c);
         }
         chars.push_back(kSentenceBoundary);
@@ -193,25 +178,24 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
       w->first = absl::StrReplaceAll(w->first, {{delimiter, ""}});
       return chars;
     }
-    std::vector<char32_t> result;
-    for (char32_t c : string_util::UTF8ToUnicodeText(w->first)) {
-      result.push_back(c);
-    }
-    return result;
+    return string_util::UTF8ToUnicodeText(w->first);
   };
 
   // Merges all sentences into one array with 0x0000 delimiter.
   std::vector<char32> array;
   absl::flat_hash_map<std::string, int64> all_chars;
 
+  const bool is_tsv = trainer_spec_.input_format() == "tsv";
+
   std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
-    std::string key = it->key().ToString();
-    std::string value = it->value().ToString();
-    int64_t count;
-    CHECK(absl::SimpleAtoi(value, &count)) << "Invalid count: " << value;
-    
-    std::pair<std::string, int64_t> w(key, count);
+    Sentence sentence;
+    util::Status status = GetSentence(it->key().ToString(), &sentence);
+    if (!status.ok()) {
+      LOG(ERROR) << "Failed to get sentence: " << status.ToString();
+      continue;  // Skip this sentence and continue with the next one
+    }
+    auto w = std::make_pair(sentence.first, sentence.second);
     const auto ut = pretokenize_or_rewrite(&w);
     for (const auto &c : ut) {
       array.push_back(c);
@@ -219,7 +203,17 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
         all_chars[string_util::UnicodeCharToUTF8(c)] += w.second;
       }
     }
-    array.push_back(kSentenceBoundary);
+    array.push_back(kSentenceBoundary);  // sentence boundary marker.
+
+    // Naive workaround to over-sample the input.
+    // In TSV mode, the frequency field is not used to extract the seed piece.
+    // we can at least extract all pieces by copying the input because
+    // the occurrence gets at least larger than or equals to 2.
+    if (is_tsv) {
+      for (const auto &c : ut) array.push_back(c);
+      array.push_back(kSentenceBoundary);
+    }
+  }
 
   // all_chars must be included in the seed sentencepieces.
   TrainerModel::SentencePieces seed_sentencepieces;
@@ -328,7 +322,6 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
 
   return seed_sentencepieces;
 }
-}
 
 std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
                                      int64 *num_tokens) const {
@@ -342,9 +335,14 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
   int64 all_sentence_freq = 0;
   std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
-    int64_t count;
-    CHECK(absl::SimpleAtoi(it->value().ToString(), &count)) << "Invalid count: " << it->value().ToString();
-    all_sentence_freq += count;
+    std::string value = it->value().ToString();
+    std::vector<std::string> parts = absl::StrSplit(value, '\t');
+    if (parts.size() == 2) {
+      int64 freq;
+      if (absl::SimpleAtoi(parts[1], &freq)) {
+        all_sentence_freq += freq;
+      }
+    }
   }
 
   // Executes E step in parallel
@@ -631,7 +629,6 @@ TrainerModel::SentencePieces Trainer::FinalizeSentencePieces(
 }
 
 util::Status Trainer::Train() {
-  RETURN_IF_ERROR(OpenSentenceDB());
   RETURN_IF_ERROR(status());
 
   CHECK_EQ_OR_RETURN(TrainerSpec::UNIGRAM, trainer_spec_.model_type());
@@ -649,14 +646,12 @@ util::Status Trainer::Train() {
     SplitSentencesByWhitespace();
   }
 
-  int64_t total_sentences = 0;
-  {
-    std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
-    for (it->SeekToFirst(); it->Valid(); it->Next()) {
-      total_sentences++;
-    }
+  int64_t sentence_count = 0;
+  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    sentence_count++;
   }
-  LOG(INFO) << "Using " << total_sentences << " sentences for EM training";
+  LOG(INFO) << "Using " << sentence_count << " sentences for EM training";
 
   desired_vocab_size_ = static_cast<size_t>(trainer_spec_.vocab_size() * 1.1);
 
@@ -692,7 +687,6 @@ util::Status Trainer::Train() {
   // Finally, adjusts the size of sentencepices to be |vocab_size|.
   final_pieces_ = FinalizeSentencePieces(model);
 
-  RETURN_IF_ERROR(CloseSentenceDB());
   return Save();
 }
 }  // namespace unigram
