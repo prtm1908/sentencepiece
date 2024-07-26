@@ -54,7 +54,7 @@ util::Status Trainer::OpenSentenceDB() {
   // Implementation to open sentence DB.
   leveldb::Options options;
   options.create_if_missing = true;
-  leveldb::Status status = leveldb::DB::Open(options, "path/to/db", &sentence_db_);
+  leveldb::Status status = leveldb::DB::Open(options, "sentence_db", &sentence_db_);
   if (!status.ok()) {
     return util::InternalError("Failed to open sentence DB");
   }
