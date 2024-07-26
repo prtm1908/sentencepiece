@@ -25,6 +25,8 @@
 #include "third_party/absl/container/flat_hash_map.h"
 #include "trainer_interface.h"
 
+#include "leveldb_utils.h"
+
 namespace sentencepiece {
 namespace bpe {
 
@@ -40,7 +42,6 @@ class Trainer : public TrainerInterface {
   util::Status Train() override;
 
  private:
-  leveldb::DB* sentence_db_;
   // Symbol represents a character or symbol bigram.
   struct Symbol {
     const Symbol *left;              // left symbol in bigram
