@@ -26,6 +26,7 @@
 #include "util.h"
 
 #include <leveldb/db.h>
+#include "leveldb_utils.h"
 
 namespace sentencepiece {
 namespace bpe {
@@ -34,40 +35,22 @@ namespace bpe {
 Trainer::Trainer(const TrainerSpec &trainer_spec,
                  const NormalizerSpec &normalizer_spec,
                  const NormalizerSpec &denormalizer_spec)
-    : TrainerInterface(trainer_spec, normalizer_spec, denormalizer_spec),
-      sentence_db_(nullptr) {
+    : TrainerInterface(trainer_spec, normalizer_spec, denormalizer_spec) {
   // Any additional initialization can go here
 }
 
 // Destructor implementation
 Trainer::~Trainer() {
-  // Destructor code here, if any cleanup is required.
-  // Since sentence_db_ is a pointer, you might want to delete it if it was allocated.
-  if (sentence_db_ != nullptr) {
-    delete sentence_db_;
-    sentence_db_ = nullptr;
-  }
 }
 
 // Implementation of OpenSentenceDB method
 util::Status Trainer::OpenSentenceDB() {
-  // Implementation to open sentence DB.
-  leveldb::Options options;
-  options.create_if_missing = true;
-  leveldb::Status status = leveldb::DB::Open(options, "sentence_db", &sentence_db_);
-  if (!status.ok()) {
-    return util::InternalError("Failed to open sentence DB");
-  }
-  return util::OkStatus();
+  return g_leveldb_manager.OpenDB("sentence_db");
 }
 
 // Implementation of CloseSentenceDB method, if needed
 util::Status Trainer::CloseSentenceDB() {
-  if (sentence_db_ != nullptr) {
-    delete sentence_db_;
-    sentence_db_ = nullptr;
-  }
-  return util::OkStatus();
+  return g_leveldb_manager.CloseDB();
 }
 
 std::string Trainer::Symbol::ToString() const {
@@ -139,7 +122,7 @@ void Trainer::ComputeFreq(Symbol *symbol) const {
     } else {
       std::string value;
       std::string key = std::to_string(pos.sid);
-      leveldb::Status status = sentence_db_->Get(leveldb::ReadOptions(), key, &value);
+      leveldb::Status status = g_leveldb_manager.GetDB()->Get(leveldb::ReadOptions(), key, &value);
       if (status.ok()) {
         size_t tab_pos = value.find('\t');
         if (tab_pos != std::string::npos) {
@@ -236,7 +219,7 @@ util::Status Trainer::Train() {
   // Pretokenizer is used as a constraint of piece extractions.
   const auto *pretokenizer = SentencePieceTrainer::GetPretokenizerForTraining();
 
-  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     std::string value = it->value().ToString();
     size_t tab_pos = value.find('\t');
