@@ -31,6 +31,7 @@
 #include "util.h"
 
 #include <leveldb/db.h>
+#include "leveldb_utils.h"
 
 
 namespace sentencepiece {
@@ -117,8 +118,6 @@ public:
   FRIEND_TEST(TrainerInterfaceTest, CharactersTest);
 
 protected:
-  std::unique_ptr<leveldb::DB> sentence_db_;
-
   util::Status OpenSentenceDB();
   util::Status CloseSentenceDB();
   // Returns true if |piece| is valid sentence piece.
@@ -168,6 +167,7 @@ protected:
   ModelProto *output_model_proto_ = nullptr;
 
 private:
+  LevelDBManager& db_manager_ = g_leveldb_manager;
   // Serialize final_pieces_ to |model_proto|.
   util::Status Serialize(ModelProto *model_proto) const;
 
