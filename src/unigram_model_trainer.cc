@@ -37,6 +37,8 @@
 #include "unicode_script.h"
 #include "util.h"
 
+#include "leveldb_utils.h"
+
 namespace sentencepiece {
 namespace unigram {
 namespace {
@@ -187,7 +189,7 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
 
   const bool is_tsv = trainer_spec_.input_format() == "tsv";
 
-  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     Sentence sentence;
     util::Status status = GetSentence(it->key().ToString(), &sentence);
@@ -333,7 +335,7 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
   pool->StartWorkers();
 
   int64 all_sentence_freq = 0;
-  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     std::string value = it->value().ToString();
     std::vector<std::string> parts = absl::StrSplit(value, '\t');
@@ -352,7 +354,7 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
       expected[n].resize(model.GetPieceSize(), 0.0);
       int64_t total_sentences = 0;
       {
-        std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+        std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
         for (it->SeekToFirst(); it->Valid(); it->Next()) {
           total_sentences++;
         }
@@ -360,7 +362,7 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
       for (size_t i = n; i < total_sentences; i += trainer_spec_.num_threads()) {
         std::string key, value;
         {
-          std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+          std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
           it->Seek(std::to_string(i));
           if (it->Valid()) {
             key = it->key().ToString();
@@ -486,7 +488,7 @@ TrainerModel::SentencePieces Trainer::PruneSentencePieces(
 
       pool->Schedule([&, n]() {
         Lattice lattice;
-        std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+        std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
         for (it->SeekToFirst(); it->Valid(); it->Next()) {
           const std::string &key = it->key().ToString();
           const std::string &value = it->value().ToString();
@@ -538,7 +540,7 @@ TrainerModel::SentencePieces Trainer::PruneSentencePieces(
       float F = 0.0;  // the frequency of sentencepieces[i].
       for (const int n : inverted[i]) {
         std::string value;
-        leveldb::Status s = sentence_db_->Get(leveldb::ReadOptions(), std::to_string(n), &value);
+        leveldb::Status s = g_leveldb_manager.GetDB()->Get(leveldb::ReadOptions(), std::to_string(n), &value);
         if (s.ok()) {
           int64_t count;
           CHECK(absl::SimpleAtoi(value, &count)) << "Invalid count: " << value;
@@ -647,7 +649,7 @@ util::Status Trainer::Train() {
   }
 
   int64_t sentence_count = 0;
-  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     sentence_count++;
   }
