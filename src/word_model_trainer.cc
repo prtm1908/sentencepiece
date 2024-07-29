@@ -26,11 +26,13 @@
 #include "absl/strings/numbers.h"
 #include <unordered_map>
 
+#include "leveldb_utils.h"
+
 namespace sentencepiece {
 namespace word {
 
 util::Status Trainer::Train() {
-  CHECK(sentence_db_ != nullptr) << "sentence_db_ is not initialized";
+  CHECK(g_leveldb_manager.GetDB() != nullptr) << "LevelDB is not initialized";
   RETURN_IF_ERROR(status());
 
   CHECK_OR_RETURN(normalizer_spec_.escape_whitespaces());
@@ -38,9 +40,9 @@ util::Status Trainer::Train() {
 
   RETURN_IF_ERROR(LoadSentences());
 
-  std::unordered_map<std::string, int64_t> freq;  // Declare freq here
+  std::unordered_map<std::string, int64_t> freq;
 
-  std::unique_ptr<leveldb::Iterator> it(sentence_db_->NewIterator(leveldb::ReadOptions()));
+  std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     const std::string &sentence = it->key().ToString();
     const std::string &value = it->value().ToString();
@@ -50,7 +52,7 @@ util::Status Trainer::Train() {
       freq[std::string(s)] += count;
     }
   }
-
+  
   const int vocab_size = trainer_spec_.vocab_size() - meta_pieces_.size();
   CHECK_GE_OR_RETURN(vocab_size, 0);
 

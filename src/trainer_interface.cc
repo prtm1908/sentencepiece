@@ -491,42 +491,42 @@ util::Status TrainerInterface::LoadSentences() {
 
   // Normalize and removes empty string.
   {
-    const normalizer::Normalizer normalizer(normalizer_spec_, trainer_spec_);
-    std::set<absl::string_view> meta_pieces_set;
-    for (const auto &it : meta_pieces_) {
-      LOG(INFO) << "Adding meta_piece: " << it.second.first;
-      meta_pieces_set.insert(it.second.first);
-    }
-    const normalizer::PrefixMatcher meta_pieces_matcher(meta_pieces_set);
-
-    LOG(INFO) << "Normalizing sentences...";
-    util::Status iterate_status = IterateSentences([&](const Sentence& sentence) -> bool {
-      auto s = sentence.first;
-      s = meta_pieces_matcher.GlobalReplace(normalizer.Normalize(s),
-                                            kUPPBoundaryStr);
-      if (s.find(" ") != std::string::npos) {
-        LOG(ERROR) << "Normalized string must not include spaces";
-        return false;
+      const normalizer::Normalizer normalizer(normalizer_spec_, trainer_spec_);
+      std::set<absl::string_view> meta_pieces_set;
+      for (const auto &it : meta_pieces_) {
+          LOG(INFO) << "Adding meta_piece: " << it.second.first;
+          meta_pieces_set.insert(it.second.first);
       }
-      if (!s.empty()) {
-        Sentence new_sentence = {s, sentence.second};
-        util::Status add_status = AddSentence(new_sentence);
-        if (!add_status.ok()) {
-          LOG(ERROR) << "Failed to add sentence: " << add_status.ToString();
-          return false;
-        }
-        util::Status delete_status = DeleteSentence(GenerateSentenceKey());
-        if (!delete_status.ok()) {
-          LOG(ERROR) << "Failed to delete sentence: " << delete_status.ToString();
-          return false;
-        }
-      }
-      return true;
-    });
+      const normalizer::PrefixMatcher meta_pieces_matcher(meta_pieces_set);
 
-    if (!iterate_status.ok()) {
-      return iterate_status;
-    }
+      LOG(INFO) << "Normalizing sentences...";
+      util::Status iterate_status = IterateSentences([&](const Sentence& sentence) -> bool {
+          auto s = sentence.first;
+          LOG(INFO) << "Before normalization: " << s;
+          s = meta_pieces_matcher.GlobalReplace(normalizer.Normalize(s), kUPPBoundaryStr);
+          LOG(INFO) << "After normalization: " << s;
+          // Remove any remaining spaces
+          s.erase(std::remove(s.begin(), s.end(), ' '), s.end());
+          if (!s.empty()) {
+              Sentence new_sentence = {s, sentence.second};
+              util::Status add_status = AddSentence(new_sentence);
+              if (!add_status.ok()) {
+                  LOG(ERROR) << "Failed to add sentence: " << add_status.ToString();
+                  return false;
+              }
+              util::Status delete_status = DeleteSentence(GenerateSentenceKey());
+              if (!delete_status.ok()) {
+                  LOG(ERROR) << "Failed to delete sentence: " << delete_status.ToString();
+                  return false;
+              }
+          }
+          return true;
+      });
+
+      if (!iterate_status.ok()) {
+          return iterate_status;
+      }
+  }
 
   // Count character frequencies.
   int64 all_chars_count = 0;
@@ -620,7 +620,7 @@ util::Status TrainerInterface::LoadSentences() {
   LOG(INFO) << "Done! preprocessed all sentences.";
 
   return util::OkStatus();
-}}
+}
 
 void TrainerInterface::SplitSentencesByWhitespace() {
   LOG(INFO) << "Tokenizing input sentences with whitespace";

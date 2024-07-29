@@ -147,7 +147,6 @@ TrainerModel::SentencePieces Trainer::MakeSeedSentencePieces() {
 // Returns seed sentencepieces for EM training.
 template <typename node_int_type>
 TrainerModel::SentencePieces Trainer::MakeSeedSentencePiecesInternal() {
-  CHECK(sentence_db_ != nullptr);
   CHECK(!required_chars_.empty());
 
   // Pretokenizer applied only in training time.
