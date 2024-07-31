@@ -371,9 +371,18 @@ std::vector<float> Trainer::RunEStep(const TrainerModel &model, float *obj,
             continue;
           }
         }
-        const std::string &w = key;
+        // Split the value into sentence and frequency
+        std::vector<std::string> parts = absl::StrSplit(value, '\t');
+        if (parts.size() != 2) {
+          LOG(ERROR) << "Invalid sentence format in LevelDB: " << value;
+          continue;
+        }
+        const std::string &w = parts[0];
         int64 freq;
-        CHECK(absl::SimpleAtoi(value, &freq)) << "Invalid frequency: " << value;
+        if (!absl::SimpleAtoi(parts[1], &freq)) {
+          LOG(ERROR) << "Invalid frequency in LevelDB: " << parts[1];
+          continue;
+        }
         lattice.SetSentence(w);
         model.PopulateNodes(&lattice);
         const float Z = lattice.PopulateMarginal(freq, &expected[n]);

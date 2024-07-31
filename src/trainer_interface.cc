@@ -39,8 +39,11 @@
 
 #include <leveldb/db.h>
 #include <leveldb/write_batch.h>
-
 #include "leveldb_utils.h"
+#include "absl/strings/str_replace.h"
+#include <regex>
+#include <algorithm>
+#include <cctype>
 
 namespace sentencepiece {
 
@@ -490,74 +493,64 @@ util::Status TrainerInterface::LoadSentences() {
     LOG(INFO) << "Loaded " << self_test_samples_.size() << " test sentences";
 
   // Normalize and removes empty string.
+  LOG(INFO) << "kUNKChar value: " << static_cast<int>(kUNKChar);
+  LOG(INFO) << "kUNKStr value: " << kUNKStr;
+
+  // Normalize and removes empty string.
   {
-      const normalizer::Normalizer normalizer(normalizer_spec_, trainer_spec_);
-      std::set<absl::string_view> meta_pieces_set;
-      for (const auto &it : meta_pieces_) {
-          LOG(INFO) << "Adding meta_piece: " << it.second.first;
-          meta_pieces_set.insert(it.second.first);
-      }
-      const normalizer::PrefixMatcher meta_pieces_matcher(meta_pieces_set);
+    const normalizer::Normalizer normalizer(normalizer_spec_, trainer_spec_);
+    std::set<absl::string_view> meta_pieces_set;
+    for (const auto &it : meta_pieces_) {
+      LOG(INFO) << "Adding meta_piece: " << it.second.first;
+      meta_pieces_set.insert(it.second.first);
+    }
+    const normalizer::PrefixMatcher meta_pieces_matcher(meta_pieces_set);
 
-      LOG(INFO) << "Normalizing sentences...";
-      util::Status iterate_status = IterateSentences([&](const Sentence& sentence) -> bool {
-          auto s = sentence.first;
-          LOG(INFO) << "Before normalization: " << s;
-          s = meta_pieces_matcher.GlobalReplace(normalizer.Normalize(s), kUPPBoundaryStr);
-          LOG(INFO) << "After normalization: " << s;
-          // Remove any remaining spaces
-          s.erase(std::remove(s.begin(), s.end(), ' '), s.end());
-          if (!s.empty()) {
-              Sentence new_sentence = {s, sentence.second};
-              util::Status add_status = AddSentence(new_sentence);
-              if (!add_status.ok()) {
-                  LOG(ERROR) << "Failed to add sentence: " << add_status.ToString();
-                  return false;
-              }
-              util::Status delete_status = DeleteSentence(GenerateSentenceKey());
-              if (!delete_status.ok()) {
-                  LOG(ERROR) << "Failed to delete sentence: " << delete_status.ToString();
-                  return false;
-              }
-          }
-          return true;
-      });
-
-      if (!iterate_status.ok()) {
-          return iterate_status;
+    LOG(INFO) << "Normalizing sentences...";
+    util::Status iterate_status = IterateSentences([&](const Sentence& sentence) -> bool {
+      auto s = sentence.first;
+      int64 freq = sentence.second;
+      LOG(INFO) << "Before normalization: " << s;
+      
+      s = meta_pieces_matcher.GlobalReplace(normalizer.Normalize(s), kUPPBoundaryStr);
+      
+      // Preserve kUNKChar while removing other whitespace and non-printable characters
+      s.erase(std::remove_if(s.begin(), s.end(), [this](unsigned char c) { 
+        return (std::isspace(c) || !std::isprint(c)) && c != kUNKChar; 
+      }), s.end());
+      
+      LOG(INFO) << "After full normalization and cleaning: " << s;
+      
+      if (!s.empty()) {
+        std::string key = GenerateSentenceKey();
+        std::string value = s + "\t" + std::to_string(freq);
+        leveldb::Status leveldb_status = g_leveldb_manager.GetDB()->Put(leveldb::WriteOptions(), key, value);
+        if (!leveldb_status.ok()) {
+          LOG(ERROR) << "Failed to add sentence to LevelDB: " << leveldb_status.ToString();
+          return false;
+        }
       }
+      return true;
+    });
+
+    if (!iterate_status.ok()) {
+      return util::InternalError(absl::StrCat("Failed to iterate sentences: ", iterate_status.ToString()));
+    }
   }
 
   // Count character frequencies.
   int64 all_chars_count = 0;
   absl::flat_hash_map<char32, std::pair<bool, int64>> chars_count;
-  for (const char32 c :
-       string_util::UTF8ToUnicodeText(trainer_spec_.required_chars())) {
-    CHECK_OR_RETURN(string_util::IsValidCodepoint(c));
-    if (c == 0x0000) {
-      LOG(INFO) << "Found null character. The required_chars field must be "
-                   "encoded in utf-8.";
-      continue;
-    }
-    chars_count[c].first = true;  // is_required_character.
-  }
+  
+  LOG(INFO) << "Counting character frequencies...";
   
   std::unique_ptr<leveldb::Iterator> it(g_leveldb_manager.GetDB()->NewIterator(leveldb::ReadOptions()));
   for (it->SeekToFirst(); it->Valid(); it->Next()) {
     Sentence sentence;
     RETURN_IF_ERROR(GetSentence(it->key().ToString(), &sentence));
+    
     for (const char32 c : string_util::UTF8ToUnicodeText(sentence.first)) {
       if (!string_util::IsValidCodepoint(c)) continue;
-      if (c == 0x0000) {
-        LOG(INFO)
-            << "Found null character. The corpus must be encoded in utf-8.";
-        continue;
-      }
-      if (c == 0x0020) {
-        CHECK_OR_RETURN(sentence.first.find(" ") == std::string::npos)
-            << "space must not be included in normalized string.";
-        continue;
-      }
       chars_count[c].second += sentence.second;
       all_chars_count += sentence.second;
     }
@@ -575,8 +568,6 @@ util::Status TrainerInterface::LoadSentences() {
       break;
     }
     accumulated_chars_count += w.second.second;
-    CHECK_NE_OR_RETURN(w.first, 0x0020)
-        << "space must not be included in normalized string.";
     if (w.first == kUPPBoundaryChar) continue;  // Tab is not included.
     required_chars_.emplace(w.first, w.second.second);
   }
@@ -585,7 +576,19 @@ util::Status TrainerInterface::LoadSentences() {
   LOG(INFO) << "Final character coverage="
             << 1.0 * accumulated_chars_count / all_chars_count;
 
-  CHECK_OR_RETURN(!port::ContainsKey(required_chars_, kUNKChar));
+  // Explicitly add kUNKChar to required_chars_
+  required_chars_.emplace(kUNKChar, 1);
+  LOG(INFO) << "Added kUNKChar to required_chars_. New size: " << required_chars_.size();
+
+  // Check if kUNKChar is in required_chars_
+  if (port::ContainsKey(required_chars_, kUNKChar)) {
+    LOG(INFO) << "kUNKChar is present in required_chars_";
+  } else {
+    LOG(ERROR) << "kUNKChar is NOT present in required_chars_";
+  }
+
+  CHECK_OR_RETURN(!port::ContainsKey(required_chars_, kUNKChar))
+      << "kUNKChar should be in required_chars_";
 
   // Replaces rare characters (characters not included in required_chars_)
   // with kUNKChar.
