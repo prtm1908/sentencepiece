@@ -580,14 +580,24 @@ util::Status TrainerInterface::LoadSentences() {
   required_chars_.emplace(kUNKChar, 1);
   LOG(INFO) << "Added kUNKChar to required_chars_. New size: " << required_chars_.size();
 
-  // Check if kUNKChar is in required_chars_
-  if (port::ContainsKey(required_chars_, kUNKChar)) {
+  // Detailed check for kUNKChar in required_chars_
+  bool unk_char_found = false;
+  for (const auto& pair : required_chars_) {
+    if (pair.first == kUNKChar) {
+      unk_char_found = true;
+      LOG(INFO) << "Found kUNKChar in required_chars_ with count: " << pair.second;
+      break;
+    }
+  }
+
+  if (unk_char_found) {
     LOG(INFO) << "kUNKChar is present in required_chars_";
   } else {
     LOG(ERROR) << "kUNKChar is NOT present in required_chars_";
   }
 
-  CHECK_OR_RETURN(!port::ContainsKey(required_chars_, kUNKChar))
+  // Use the unk_char_found variable for the check
+  CHECK_OR_RETURN(unk_char_found)
       << "kUNKChar should be in required_chars_";
 
   // Replaces rare characters (characters not included in required_chars_)
@@ -621,7 +631,6 @@ util::Status TrainerInterface::LoadSentences() {
   }
 
   LOG(INFO) << "Done! preprocessed all sentences.";
-
   return util::OkStatus();
 }
 
